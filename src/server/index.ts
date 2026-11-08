@@ -83,7 +83,12 @@ import {
 } from "./system-settings.js";
 import { applyDnsProviderARecord, dnsProviderName, dnsProviderSettings } from "./dns-providers.js";
 import { getSystemUpdateInfo, startSystemUpdate } from "./system-updates.js";
-import { ensureDefaultDomainForService, ensureDefaultDomainsForExistingServices, isGeneratedServiceHostname } from "./service-domains.js";
+import {
+  ensureDefaultDomainForService,
+  ensureDefaultDomainsForExistingServices,
+  isGeneratedServiceHostname,
+  reconcileGeneratedDomainsToRootDomain
+} from "./service-domains.js";
 import { normalizeRootDomain } from "./root-domain.js";
 import { ensureR2Bucket } from "./r2-storage.js";
 import {
@@ -1749,8 +1754,13 @@ app.post("/api/system/settings", async (c) => {
 
   saveSystemSettings({ ...settings, rootDomain, controlPlaneHostname, deploymentConcurrency, databaseBackupScheduleDefaults });
   const routingChanged = hasRootDomain || hasControlPlaneHostname;
+  let domainMigration: ReturnType<typeof reconcileGeneratedDomainsToRootDomain> | undefined;
   if (hasRootDomain && rootDomain) {
-    ensureDefaultDomainsForExistingServices(rootDomain);
+    // Move auto-generated app/db hostnames off the former root(s) onto the new one,
+    // then ensure every service has a default URL under the new root.
+    domainMigration = reconcileGeneratedDomainsToRootDomain(rootDomain);
+  } else if (hasRootDomain && !rootDomain) {
+    // Clearing the root domain leaves existing hostnames in place (manual cleanup).
   }
   if (routingChanged) {
     syncAllExistingDatabaseUrls();
@@ -1765,6 +1775,7 @@ app.post("/api/system/settings", async (c) => {
       databaseBackupScheduleDefaults,
       databaseBackupsAutomaticEnabled: backupSchedulesEnabled(databaseBackupScheduleDefaults)
     },
+    domainMigration,
     caddy
   });
 });
