@@ -150,6 +150,12 @@ export function RootDomainSettingsPanel({ open }: { open: boolean }) {
           <h2 className="text-xl tracking-[-0.03em] text-white">Service domains</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">
             A wildcard hostname used to generate a default URL for every service.
+            Saving a new root automatically moves auto-generated app URLs off the former
+            domain and rebuilds Caddy (custom domains are left unchanged). Use one DNS
+            label under the apex for Cloudflare free SSL — e.g.{" "}
+            <span className="font-mono text-zinc-300">*.raiserights.com</span>
+            {" "}→ <span className="font-mono text-zinc-300">sofi.raiserights.com</span>
+            {" "}(not <span className="font-mono text-zinc-300">sofi.app.raiserights.com</span>).
           </p>
           {hasSavedDomain && !editingDomain ? (
             <div className="mt-5 flex flex-wrap items-center gap-3">
