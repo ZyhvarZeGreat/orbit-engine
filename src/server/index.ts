@@ -5,7 +5,7 @@ import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { nanoid } from "nanoid";
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 import net from "node:net";
 import dns from "node:dns/promises";
@@ -1470,7 +1470,17 @@ app.get("/api/assets/framework-icons/:file", async (c) => {
 // (no users yet). Post-setup access is gated to the owner inside each handler.
 type GitHubManifestState = { expiresAt: number; redirectTo: string };
 const githubManifestStates = new Map<string, GitHubManifestState>();
-const githubManifestStateTtl = 15 * 60 * 1000;
+const seenWebhookDeliveries = new Map<string, number>();
+
+function isDuplicateWebhookDelivery(key: string) {
+  const now = Date.now();
+  for (const [id, ts] of seenWebhookDeliveries) {
+    if (now - ts > 10 * 60_000) seenWebhookDeliveries.delete(id);
+  }
+  if (seenWebhookDeliveries.has(key)) return true;
+  seenWebhookDeliveries.set(key, now);
+  return false;
+}const githubManifestStateTtl = 15 * 60 * 1000;
 const githubManifestStateLimit = 500;
 
 function requestBaseUrl(c: Context) {
@@ -3491,6 +3501,11 @@ app.post("/api/github/app/webhook", async (c) => {
     return jsonError("Invalid webhook signature", 401);
   }
 
+  const deliveryId = c.req.header("x-github-delivery");
+  if (deliveryId && isDuplicateWebhookDelivery(`github:${deliveryId}`)) {
+    return c.json({ ok: true, ignored: "duplicate delivery" });
+  }
+
   const event = c.req.header("x-github-event");
   if (event === "ping") {
     return c.json({ ok: true, event: "ping" });
@@ -3535,8 +3550,17 @@ app.post("/api/gitlab/webhook", async (c) => {
   if (!config.gitlabWebhookSecret) {
     return jsonError("GitLab webhook secret is not configured", 503);
   }
-  if (c.req.header("x-gitlab-token") !== config.gitlabWebhookSecret) {
+  const providedToken = c.req.header("x-gitlab-token") ?? "";
+  const expectedToken = config.gitlabWebhookSecret;
+  const givenBytes = Buffer.from(providedToken);
+  const expectedBytes = Buffer.from(expectedToken);
+  if (givenBytes.length !== expectedBytes.length || !timingSafeEqual(givenBytes, expectedBytes)) {
     return jsonError("Invalid webhook token", 401);
+  }
+
+  const deliveryId = c.req.header("x-gitlab-event-uuid") ?? c.req.header("id");
+  if (deliveryId && isDuplicateWebhookDelivery(`gitlab:${deliveryId}`)) {
+    return c.json({ ok: true, ignored: "duplicate delivery" });
   }
 
   const event = c.req.header("x-gitlab-event");
