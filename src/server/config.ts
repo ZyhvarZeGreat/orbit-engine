@@ -78,6 +78,8 @@ export const config = {
   githubAppSlug: process.env.GITHUB_APP_SLUG ?? "",
   githubAppPrivateKey: (process.env.GITHUB_APP_PRIVATE_KEY ?? "").replace(/\\n/g, "\n"),
   githubWebhookSecret: process.env.GITHUB_WEBHOOK_SECRET ?? "",
+  gitlabBaseUrl: (process.env.GITLAB_BASE_URL ?? "https://gitlab.com").replace(/\/$/, ""),
+  gitlabWebhookSecret: process.env.GITLAB_WEBHOOK_SECRET ?? "",
   buildkitHost: process.env.BUILDKIT_HOST ?? "tcp://127.0.0.1:1234",
   runtimeNetworkName: process.env.AEROPLANE_RUNTIME_NETWORK ?? "aeroplane-runtime",
   secretKey: process.env.AEROPLANE_SECRET_KEY ?? "",

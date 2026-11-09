@@ -3531,6 +3531,54 @@ app.post("/api/github/app/webhook", async (c) => {
   return c.json({ ok: true, queued: queued.map((deployment) => deployment.id) });
 });
 
+app.post("/api/gitlab/webhook", async (c) => {
+  if (!config.gitlabWebhookSecret) {
+    return jsonError("GitLab webhook secret is not configured", 503);
+  }
+  if (c.req.header("x-gitlab-token") !== config.gitlabWebhookSecret) {
+    return jsonError("Invalid webhook token", 401);
+  }
+
+  const event = c.req.header("x-gitlab-event");
+  if (event === "Push Hook") {
+    const payload = (await c.req.json().catch(() => ({}))) as {
+      ref?: string;
+      checkout_sha?: string;
+      project?: { path_with_namespace?: string; git_http_url?: string };
+    };
+    const branch = branchFromGitRef(payload.ref);
+    const pathWithNamespace = payload.project?.path_with_namespace;
+    const gitHttpUrl = payload.project?.git_http_url;
+    if (!branch || (!pathWithNamespace && !gitHttpUrl)) {
+      return c.json({ ok: true, ignored: "missing ref or project" });
+    }
+
+    // Match services by either owner/repo (repoFullName) or the full clone URL.
+    const candidates = db.select().from(services).all();
+    const matchingServices = candidates.filter((service) => {
+      if (service.branch !== branch) return false;
+      const byFullName = Boolean(pathWithNamespace) && service.repoFullName === pathWithNamespace;
+      const byUrl = Boolean(gitHttpUrl) && service.repoUrl.replace(/\.git$/, "") === gitHttpUrl!.replace(/\.git$/, "");
+      return byFullName || byUrl;
+    });
+
+    if (matchingServices.length === 0) {
+      return c.json({ ok: true, ignored: `${pathWithNamespace ?? gitHttpUrl}@${branch}` });
+    }
+
+    for (const projectId of new Set(matchingServices.map((service) => service.projectId))) {
+      syncProjectDatabaseConnectionEnv(projectId);
+    }
+
+    const queued = matchingServices.map((service) =>
+      enqueueDeployment(service.id, { trigger: "gitlab", commitSha: payload.checkout_sha })
+    );
+    return c.json({ ok: true, queued: queued.map((deployment) => deployment.id) });
+  }
+
+  return c.json({ ok: true, ignored: event ?? "unknown" });
+});
+
 app.post("/api/integrations/railway/projects", async (c) => {
   try {
     const body = await c.req.json();

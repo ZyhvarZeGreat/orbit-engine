@@ -56,7 +56,7 @@ type BufferedCommandResult = {
 
 type EnqueueOptions = {
   commitSha?: string;
-  trigger: "manual" | "github";
+  trigger: "manual" | "github" | "gitlab";
 };
 
 let workerStarted = false;
@@ -209,14 +209,24 @@ function runBufferedCommand(command: string, args: string[], options: RunOptions
 }
 
 function cloneUrlWithToken(repoUrl: string, token?: string | null) {
-  if (!token || !repoUrl.startsWith("https://github.com/")) {
+  if (!token || !repoUrl.startsWith("https://")) {
     return repoUrl;
   }
 
   const url = new URL(repoUrl);
-  url.username = "x-access-token";
-  url.password = token;
-  return url.toString();
+  if (url.hostname === "github.com") {
+    url.username = "x-access-token";
+    url.password = token;
+    return url.toString();
+  }
+  // GitLab accepts OAuth tokens as the password with the `oauth2` username.
+  const gitlabHost = new URL(config.gitlabBaseUrl).hostname;
+  if (url.hostname === gitlabHost || url.hostname === "gitlab.com") {
+    url.username = "oauth2";
+    url.password = token;
+    return url.toString();
+  }
+  return repoUrl;
 }
 
 function serviceCanUseInstanceGithubCredentials(service: Service) {
